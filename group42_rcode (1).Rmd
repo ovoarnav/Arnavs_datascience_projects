@@ -1,0 +1,185 @@
+---
+title: "STA302 Part 3 Final Code"
+author: "Project Group 42"
+output: pdf_document
+---
+
+``` {r, echo=FALSE , results='hide', message=FALSE, warning=FALSE}
+library(NHANES)
+library(dplyr)
+library(tidyverse)
+library(corrplot)
+data(NHANES) # Load data
+
+```
+
+```{r}
+
+#After reading the description of the variables within the dataset, we chose to generate the variables that we believed may be relevant.
+
+df <- NHANES[ , c("ID", 
+                  "DaysMentHlthBad",
+                  "Age",
+                  "SleepHrsNight", 
+                  "PhysActiveDays", 
+                  "nPregnancies", 
+                  "AgeFirstMarij",
+                  "SmokeAge",
+                  "SameSex",
+                  "SexNumPartnLife",
+                  "AlcoholYear",
+                  "HardDrugs",
+                  "RegularMarij",
+                  "MaritalStatus",
+                  "SleepTrouble",
+                  "AlcoholDay",
+                  "Gender",
+                  "LittleInterest",
+                  "HHIncomeMid"
+                 )]
+
+# Remove Duplicate Rows
+df <- df %>% distinct(ID, .keep_all = TRUE)
+
+# Remove rows containing NA values
+df <- na.omit(df)
+
+summary(df)
+
+# Create a histogram of the response variable to look for presence of a skew
+hist(df$DaysMentHlthBad)
+
+# Perform exploratory research through the use of scatterplots and a correlation matrix, to determine relevant variables to include in the regression model.
+plot(df[, c(2,3,4,5,6,7)])
+plot(df[, c(2,8,10,11,16,19)])
+
+selected_columns <- c(2, 3,4,5,6,7,8,10,11,16,19)  
+selected_variables <- df[, selected_columns]
+
+# Create a correlation matrix for the selected variables
+correlation_matrix <- cor(selected_variables)
+
+# Create a heatmap using the corrplot package
+corrplot(correlation_matrix, method='color', addCoef.col='black', number.cex=0.7, tl.cex=0.7)
+
+
+# Assuming 'df' is your data frame and 'y' is your response variable
+model <- lm(DaysMentHlthBad ~ nPregnancies + AgeFirstMarij  + SexNumPartnLife, data = df)
+
+# Get leverage values
+leverage_values <- hatvalues(model)
+
+# Set a threshold for leverage (e.g., 2 times the average leverage)
+leverage_threshold <- 2 * mean(leverage_values)
+
+# Subset data to exclude high leverage points
+df_no_high_leverage <- df[leverage_values <= leverage_threshold, ]
+
+# Get Cook's distances
+influential_points <- influence.measures(model)$infmat[, "cook.d"]
+
+# Set a threshold for Cook's distance (e.g., 4 times the mean)
+cook_threshold <- 4 * mean(influential_points)
+
+# Subset data to exclude influential points
+df_no_influential <- df[influential_points <= cook_threshold, ]
+
+
+plot(df_no_influential[, c(2,3,4,5,6,7)])
+plot(df_no_influential[, c(2,8,10,11,16,19)])
+
+selected_columns <- c(2, 3,4,5,6,7,8,10,11,16,19)  
+selected_variables1 <- df_no_influential[, selected_columns]
+
+# Create a correlation matrix for the selected variables
+correlation_matrix1 <- cor(selected_variables1)
+
+# Create a heatmap using the corrplot package
+corrplot(correlation_matrix1, method='color', addCoef.col='black', number.cex=0.7, tl.cex=0.7)
+
+
+# Convert Categorical Vars to Numerical
+df$SameSex <- ifelse(df$SameSex == "Yes", 1, 0)
+df$HardDrugs <- ifelse(df$HardDrugs == "Yes", 1, 0)
+df$RegularMarij <- ifelse(df$RegularMarij == "Yes", 1, 0)
+
+
+# Assuming your data frame is named df and the gender variable is named "gender"
+df$male <- ifelse(df$Gender == "male", 1, 0)
+
+
+# Convert PhysActiveDays NA vals to 0. * Ages 12 already removed since all 
+# DaysMentHlthBad = NA vals removed.
+df$PhysActiveDays[is.na(df$PhysActiveDays)] <- 0
+
+
+df$LittleInterest <- ifelse(df$LittleInterest == "None", 0,
+                          ifelse(df$LittleInterest == "Several", 1,
+                                 ifelse(df$LittleInterest == "Majority", 1, NA)))
+
+m <- fit0 <- lm((DaysMentHlthBad) ~ 
+                  SleepHrsNight*PhysActiveDays*nPregnancies*AgeFirstMarij*SexNumPartnLife*AlcoholYear  
+                  ,data = df)
+
+
+n <- nrow(df)
+stepfit = step(m, direction="both", k = log(n), trace=0)
+summary(stepfit)
+
+
+# Check the final model assumptions
+par(mfrow = c(2, 2))
+plot(stepfit, which = c(1, 2, 3, 4))
+
+
+# Apply Box-Cox transformation
+
+library(MASS)
+
+df$newDaysMentHlthBad <- df$DaysMentHlthBad +1
+
+bc <- boxcox((df$newDaysMentHlthBad) ~ SleepHrsNight * PhysActiveDays * 
+    nPregnancies * AgeFirstMarij * SexNumPartnLife * AlcoholYear, 
+                data = df)
+             lambda = seq(-2, 2, by = 0.1)
+
+best_lambda <- bc$x[which.max(bc$y)]
+
+df$TransformedDaysMentHlthBad <- (df$newDaysMentHlthBad^best_lambda - 1) / best_lambda
+
+# Fit the linear model with the transformed variable
+fit <- lm(TransformedDaysMentHlthBad ~ SleepHrsNight * PhysActiveDays * 
+    nPregnancies * AgeFirstMarij * SexNumPartnLife * AlcoholYear, 
+          data = df)
+
+# Plot residuals vs fitted values
+plot(fitted(fit), residuals(fit),
+     xlab = "Fitted Values",
+     ylab = "Residuals")
+
+abline(h = 0, col = "red")
+
+par(mfrow = c(2, 2))
+plot(fit, which = c(1, 2, 3, 4))
+
+summary(fit)
+
+# With the goal of finding statistically significant variables, we added some categorical variables in and continued to use the transformed response variable
+
+m <- lm(TransformedDaysMentHlthBad ~ 
+        SleepHrsNight*PhysActiveDays*nPregnancies*AgeFirstMarij*SexNumPartnLife*AlcoholYear*SameSex*male,
+        data = df)
+
+n <- nrow(df)
+stepfit = step(m, direction="both", k = log(n), trace=0)
+summary(stepfit)
+
+
+# Check the final model assumptions
+par(mfrow = c(2, 2))
+plot(stepfit, which = c(1, 2, 3, 4))
+
+
+
+```
+
